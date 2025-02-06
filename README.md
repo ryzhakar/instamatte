@@ -25,7 +25,7 @@ pip install instamatte
 
 ## Quick Start
 
-1. Create a `config.yaml` in your images directory:
+1. Create a `instamatte.yaml` in your images directory:
 ```yaml
 - output_dir: stories
   frame_width: 1080
