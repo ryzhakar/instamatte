@@ -22,7 +22,7 @@ CONFIG_FILENAME = "instamatte.yaml"
 class FormatConfig(BaseModel):
     """Configuration for a single output format."""
 
-    output_dir: Path = Path("instamatte-processed")
+    output_dir: str = "instamatte-processed"
     frame_width: int = Field(default=1080, ge=1)
     frame_height: int = Field(default=1920, ge=1)
     target_surface_pct: float = Field(default=80.0, gt=0, le=100)
@@ -114,7 +114,7 @@ def process_image(img_path: Path, cfg: FormatConfig) -> None:
             f"(min: {cfg.margin_pct}%)"
         )
 
-        out_path = cfg.output_dir / img_path.name
+        out_path = Path(cfg.output_dir) / img_path.name
         background.save(out_path, quality=95)
 
 
@@ -143,7 +143,7 @@ def main(
         # Find all unique images
         all_images = set()
         for fmt in formats:
-            fmt.output_dir.mkdir(parents=True, exist_ok=True)
+            Path(fmt.output_dir).mkdir(parents=True, exist_ok=True)
 
             base_pattern = fmt.pattern
             if "{" in base_pattern:
