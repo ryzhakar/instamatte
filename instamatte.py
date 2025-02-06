@@ -16,14 +16,16 @@ __version__ = "0.1.0"
 console = Console()
 app = typer.Typer(add_completion=False)
 
+CONFIG_FILENAME = "instamatte.yaml"
+
 
 class FormatConfig(BaseModel):
     """Configuration for a single output format."""
 
-    output_dir: Path
+    output_dir: Path = Path("instamatte-processed")
     frame_width: int = Field(default=1080, ge=1)
     frame_height: int = Field(default=1920, ge=1)
-    target_surface_pct: float = Field(default=85.0, gt=0, le=100)
+    target_surface_pct: float = Field(default=80.0, gt=0, le=100)
     margin_pct: float = Field(default=5.0, ge=0, le=50)
     pattern: str = Field(default="*.{jpg,jpeg,png,gif,bmp}")
     bg_color: str = Field(default="WHITE")
@@ -125,10 +127,12 @@ def main(
     """Process images to multiple output formats defined in config.yaml."""
     try:
         work_dir = Path(input_dir)
-        config_path = work_dir / "config.yaml"
-
+        config_path = work_dir / CONFIG_FILENAME
         if not config_path.exists():
-            raise typer.Exit(f"No config.yaml found in {work_dir}")
+            # Create default config
+            with open(config_path, "w") as f:
+                yaml.dump([FormatConfig().dict()], f, sort_keys=False)
+            console.print(f"[green]Created default config at {config_path}")
 
         # Load formats from config
         with open(config_path) as f:
