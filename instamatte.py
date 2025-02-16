@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 from rich.console import Console
 from rich.progress import track
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 console = Console()
 app = typer.Typer(add_completion=False)
@@ -96,24 +96,6 @@ def process_image(img_path: Path, cfg: FormatConfig) -> None:
 
         background.paste(resized, (x, y))
 
-        actual_surface_pct = (
-            (new_size[0] * new_size[1])
-            / (cfg.frame_width * cfg.frame_height)
-            * 100
-        )
-        min_margin_pct = min(
-            x / min(cfg.frame_width, cfg.frame_height) * 100,
-            y / min(cfg.frame_width, cfg.frame_height) * 100,
-        )
-
-        console.print(
-            f"[blue]{cfg.output_dir}/{img_path.name}:[/] "
-            f"surface: {actual_surface_pct:.1f}% "
-            f"(target: {cfg.target_surface_pct}%), "
-            f"margin: {min_margin_pct:.1f}% "
-            f"(min: {cfg.margin_pct}%)"
-        )
-
         out_path = Path(cfg.output_dir) / img_path.name
         background.save(out_path, quality=95)
 
@@ -128,48 +110,45 @@ def main(
     try:
         work_dir = Path(input_dir)
         config_path = work_dir / CONFIG_FILENAME
+        
         if not config_path.exists():
-            # Create default config
             with open(config_path, "w") as f:
-                yaml.dump([FormatConfig().dict()], f, sort_keys=False)
+                yaml.dump([FormatConfig().model_dump()], f, sort_keys=False)
             console.print(f"[green]Created default config at {config_path}")
 
-        # Load formats from config
         with open(config_path) as f:
             formats = [
                 FormatConfig.model_validate(fmt) for fmt in yaml.safe_load(f)
             ]
 
-        # Find all unique images
-        all_images = set()
+        work_dir_path = Path(input_dir)
+        format_images = {}
+
         for fmt in formats:
             Path(fmt.output_dir).mkdir(parents=True, exist_ok=True)
-
-            base_pattern = fmt.pattern
-            if "{" in base_pattern:
-                prefix, ext_list = base_pattern.split("{")
-                extensions = ext_list.rstrip("}").split(",")
-                for ext in extensions:
-                    pattern = f"{prefix}{ext.strip()}"
-                    search_path = str(work_dir / pattern)
-                    all_images.update(Path(p) for p in glob.glob(search_path))
+            format_images[fmt.output_dir] = set()
+            
+            if "{" in fmt.pattern:
+                prefix = fmt.pattern.split("{")[0]
+                extensions_str = fmt.pattern.split("{")[1].split("}")[0]
+                patterns = [f"{prefix}{ext.strip()}" for ext in extensions_str.split(",")]
             else:
-                search_path = str(work_dir / base_pattern)
-                all_images.update(Path(p) for p in glob.glob(search_path))
+                patterns = [fmt.pattern]
+            
+            for pattern in patterns:
+                format_images[fmt.output_dir].update(work_dir_path.glob(pattern))
 
-        images = sorted(all_images)
+            images = sorted(format_images[fmt.output_dir])
+            if not images:
+                console.print(f"[yellow]No images found for {fmt.output_dir}")
+                continue
 
-        if not images:
-            console.print("[yellow]No matching images found")
-            raise typer.Exit(1)
-
-        # Process each image in each format
-        for img_path in track(images, description="Processing..."):
-            try:
-                for fmt in formats:
+            console.print(f"[blue]Processing {len(images)} images for {fmt.output_dir}")
+            for img_path in track(images, description=f"Processing {fmt.output_dir}..."):
+                try:
                     process_image(img_path, fmt)
-            except Exception as e:
-                console.print(f"[red]Error processing {img_path}: {e}")
+                except Exception as e:
+                    console.print(f"[red]Error processing {img_path}: {e}")
 
     except Exception as e:
         console.print(f"[red]Error: {e}")
