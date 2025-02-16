@@ -1,6 +1,5 @@
 """Multi-format image processor for social media."""
 
-import glob
 from pathlib import Path
 from typing import Annotated, Tuple
 
@@ -11,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from rich.console import Console
 from rich.progress import track
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 console = Console()
 app = typer.Typer(add_completion=False)
@@ -108,12 +107,18 @@ def main(
 ) -> None:
     """Process images to multiple output formats defined in config.yaml."""
     try:
-        work_dir = Path(input_dir)
+        # Resolve relative path to absolute
+        work_dir = Path(input_dir).resolve()
+        
+        if not work_dir.exists():
+            console.print(f"[red]Directory not found: {work_dir}")
+            raise typer.Exit(1)
+            
         config_path = work_dir / CONFIG_FILENAME
         
         if not config_path.exists():
             with open(config_path, "w") as f:
-                yaml.dump([FormatConfig().model_dump()], f, sort_keys=False)
+                yaml.dump([FormatConfig().dict()], f, sort_keys=False)
             console.print(f"[green]Created default config at {config_path}")
 
         with open(config_path) as f:
@@ -121,10 +126,11 @@ def main(
                 FormatConfig.model_validate(fmt) for fmt in yaml.safe_load(f)
             ]
 
-        work_dir_path = Path(input_dir)
         format_images = {}
 
         for fmt in formats:
+            # Make output directory path absolute relative to the working directory
+            fmt.output_dir = str(work_dir / fmt.output_dir)
             Path(fmt.output_dir).mkdir(parents=True, exist_ok=True)
             format_images[fmt.output_dir] = set()
             
@@ -136,7 +142,7 @@ def main(
                 patterns = [fmt.pattern]
             
             for pattern in patterns:
-                format_images[fmt.output_dir].update(work_dir_path.glob(pattern))
+                format_images[fmt.output_dir].update(work_dir.glob(pattern))
 
             images = sorted(format_images[fmt.output_dir])
             if not images:
