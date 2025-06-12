@@ -1,16 +1,18 @@
 """Multi-format image processor for social media."""
 
 from pathlib import Path
-from typing import Annotated, Tuple
+import os
+from typing import Annotated, Tuple, Optional, Dict, Any
+import re
 
 import typer
 import yaml
-from PIL import Image
-from pydantic import BaseModel, Field, field_validator
+from PIL import Image, ImageColor
+from pydantic import BaseModel, Field, field_validator, ValidationError
 from rich.console import Console
 from rich.progress import track
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 console = Console()
 app = typer.Typer(add_completion=False)
@@ -34,6 +36,23 @@ class FormatConfig(BaseModel):
         if v >= 50:
             raise ValueError("Margin percentage must be less than 50%")
         return v
+        
+    @field_validator("bg_color")
+    def color_must_be_valid(cls, v: str) -> str:
+        try:
+            # Verify color is valid by attempting to convert it
+            ImageColor.getrgb(v)
+            return v
+        except ValueError:
+            raise ValueError(f"Invalid color '{v}'. Use color name (e.g., 'BLACK') or hex (e.g., '#000000')")
+
+
+def validate_image_dimensions(img_width: int, img_height: int) -> None:
+    """Validate image dimensions are positive."""
+    if img_width <= 0:
+        raise ValueError("Image width must be positive")
+    if img_height <= 0:
+        raise ValueError("Image height must be positive")
 
 
 def calculate_dimensions(
@@ -45,58 +64,147 @@ def calculate_dimensions(
     margin_pct: float,
 ) -> Tuple[int, int]:
     """Calculate dimensions maximizing surface area while respecting minimum margin."""
+    # Validate inputs to prevent division by zero
+    validate_image_dimensions(img_width, img_height)
+    
     frame_area = frame_width * frame_height
     min_frame_dim = min(frame_width, frame_height)
     min_margin_px = int(min_frame_dim * (margin_pct / 100))
+    
+    # Ensure margins aren't too large for the frame
+    max_margin = min(frame_width, frame_height) // 2 - 1
+    if min_margin_px >= max_margin:
+        console.print(f"[yellow]Warning: Margin too large, reducing to maximum possible value")
+        min_margin_px = max_margin - 1
+        
+    # Calculate available space accounting for margins
+    max_width = max(1, frame_width - 2 * min_margin_px)
+    max_height = max(1, frame_height - 2 * min_margin_px)
+    
+    # Determine aspect ratio safely
     img_ratio = img_width / img_height
-
-    max_width = frame_width - 2 * min_margin_px
-    max_height = frame_height - 2 * min_margin_px
-
+    
+    # Calculate target area and dimensions
     target_area = frame_area * (target_surface_pct / 100)
+    
+    # Handle extreme aspect ratios by capping the target area
+    aspect_ratio_factor = max(img_ratio, 1/img_ratio)
+    if aspect_ratio_factor > 5:  # If extreme aspect ratio (very wide or very tall)
+        target_surface_pct = min(target_surface_pct, 70)  # Cap at 70% to avoid strange results
+        target_area = frame_area * (target_surface_pct / 100)
+    
     trial_width = (target_area * img_ratio) ** 0.5
     trial_height = trial_width / img_ratio
 
+    # Apply proper rounding to avoid dimension inconsistencies
     if trial_width <= max_width and trial_height <= max_height:
-        return int(trial_width), int(trial_height)
+        return round(trial_width), round(trial_height)
 
     if trial_width / max_width > trial_height / max_height:
-        return max_width, int(max_width / img_ratio)
+        return max_width, round(max_width / img_ratio)
     else:
-        return int(max_height * img_ratio), max_height
+        return round(max_height * img_ratio), max_height
+
+
+def get_safe_output_path(output_dir: Path, img_path: Path) -> Path:
+    """Create a unique output path to avoid filename collisions."""
+    base_output = output_dir / img_path.name
+    
+    # If file doesn't exist yet, return the original path
+    if not base_output.exists():
+        return base_output
+        
+    # If file exists, add a suffix to make it unique
+    name_parts = img_path.stem, img_path.suffix
+    counter = 1
+    while True:
+        new_name = f"{name_parts[0]}_{counter}{name_parts[1]}"
+        new_path = output_dir / new_name
+        if not new_path.exists():
+            return new_path
+        counter += 1
 
 
 def process_image(img_path: Path, cfg: FormatConfig) -> None:
     """Process a single image for one output format."""
-    with Image.open(img_path) as img:
-        if img.mode in ("RGBA", "LA"):
-            bg = Image.new("RGB", img.size, cfg.bg_color)
-            bg.paste(img, mask=img.split()[-1])
-            img = bg
-        elif img.mode != "RGB":
-            img = img.convert("RGB")
+    try:
+        with Image.open(img_path) as img:
+            # Handle transparency - convert to RGB with background color
+            if img.mode in ("RGBA", "LA"):
+                # Create a background with specified color
+                bg = Image.new("RGB", img.size, cfg.bg_color)
+                # Handle different alpha channel positions safely
+                if img.mode == "RGBA":
+                    alpha_channel = img.split()[3]  # RGBA - alpha is channel 3
+                else:  # LA mode
+                    alpha_channel = img.split()[1]  # LA - alpha is channel 1
+                bg.paste(img, mask=alpha_channel)
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
 
-        new_size = calculate_dimensions(
-            img.width,
-            img.height,
-            cfg.frame_width,
-            cfg.frame_height,
-            cfg.target_surface_pct,
-            cfg.margin_pct,
-        )
+            new_size = calculate_dimensions(
+                img.width,
+                img.height,
+                cfg.frame_width,
+                cfg.frame_height,
+                cfg.target_surface_pct,
+                cfg.margin_pct,
+            )
 
-        resized = img.resize(new_size, Image.Resampling.LANCZOS)
-        background = Image.new(
-            "RGB", (cfg.frame_width, cfg.frame_height), cfg.bg_color
-        )
+            # Safety check for dimensions
+            if new_size[0] <= 0 or new_size[1] <= 0:
+                raise ValueError(f"Invalid calculated dimensions: {new_size}")
 
-        x = (cfg.frame_width - new_size[0]) // 2
-        y = (cfg.frame_height - new_size[1]) // 2
+            # Use LANCZOS for high-quality downsampling
+            resized = img.resize(new_size, Image.Resampling.LANCZOS)
+            
+            try:
+                background = Image.new(
+                    "RGB", (cfg.frame_width, cfg.frame_height), cfg.bg_color
+                )
+            except ValueError as e:
+                raise ValueError(f"Invalid background color '{cfg.bg_color}': {e}")
 
-        background.paste(resized, (x, y))
+            x = (cfg.frame_width - new_size[0]) // 2
+            y = (cfg.frame_height - new_size[1]) // 2
 
-        out_path = Path(cfg.output_dir) / img_path.name
-        background.save(out_path, quality=95)
+            background.paste(resized, (x, y))
+
+            output_dir = Path(cfg.output_dir)
+            output_dir.mkdir(exist_ok=True, parents=True)
+            out_path = get_safe_output_path(output_dir, img_path)
+            
+            background.save(out_path, quality=95)
+            
+    except Exception as e:
+        console.print(f"[red]Error processing {img_path}: {e}")
+        raise
+
+
+def parse_glob_pattern(pattern: str) -> list[str]:
+    """Parse glob pattern safely to handle various formats."""
+    patterns = []
+    
+    # Handle standard glob patterns without braces
+    if "{" not in pattern:
+        patterns = [pattern]
+    else:
+        try:
+            # Extract parts before and after the brace pattern
+            match = re.match(r"^(.*?)\{(.*?)\}(.*)$", pattern)
+            if match:
+                prefix, extensions, suffix = match.groups()
+                for ext in extensions.split(","):
+                    patterns.append(f"{prefix}{ext.strip()}{suffix}")
+            else:
+                # If regex doesn't match but has braces, use original pattern
+                patterns = [pattern]
+        except Exception:
+            # Fallback to original pattern if parsing fails
+            patterns = [pattern]
+            
+    return patterns
 
 
 @app.command()
@@ -118,13 +226,18 @@ def main(
         
         if not config_path.exists():
             with open(config_path, "w") as f:
-                yaml.dump([FormatConfig().dict()], f, sort_keys=False)
+                yaml.dump([FormatConfig().model_dump()], f, sort_keys=False)
             console.print(f"[green]Created default config at {config_path}")
 
         with open(config_path) as f:
-            formats = [
-                FormatConfig.model_validate(fmt) for fmt in yaml.safe_load(f)
-            ]
+            try:
+                formats = [
+                    FormatConfig.model_validate(fmt) for fmt in yaml.safe_load(f)
+                ]
+            except ValidationError as e:
+                console.print(f"[red]Invalid configuration in {config_path}:")
+                console.print(f"[red]{e}")
+                raise typer.Exit(1)
 
         format_images = {}
 
@@ -134,12 +247,7 @@ def main(
             Path(fmt.output_dir).mkdir(parents=True, exist_ok=True)
             format_images[fmt.output_dir] = set()
             
-            if "{" in fmt.pattern:
-                prefix = fmt.pattern.split("{")[0]
-                extensions_str = fmt.pattern.split("{")[1].split("}")[0]
-                patterns = [f"{prefix}{ext.strip()}" for ext in extensions_str.split(",")]
-            else:
-                patterns = [fmt.pattern]
+            patterns = parse_glob_pattern(fmt.pattern)
             
             for pattern in patterns:
                 format_images[fmt.output_dir].update(work_dir.glob(pattern))
