@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from rich.console import Console
 from rich.progress import track
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 console = Console()
 app = typer.Typer(add_completion=False)
@@ -269,6 +269,9 @@ def mount_image(img_path: Path, format_config: SocialFormat) -> None:
     """Process a single image according to format specifications."""
     try:
         with Image.open(img_path) as img:
+            # Extract ICC profile for color preservation
+            icc_profile = img.info.get('icc_profile')
+            
             prepared_img = prepare_image_for_mounting(
                 img, format_config.mat_color,
             )
@@ -285,7 +288,22 @@ def mount_image(img_path: Path, format_config: SocialFormat) -> None:
             output_dir.mkdir(exist_ok=True, parents=True)
             out_path = create_unique_filename(output_dir, img_path)
 
-            mounted_img.save(out_path, quality=95)
+            # Prepare save parameters for optimal color preservation
+            save_kwargs = {'quality': 95}
+            
+            # Apply JPEG-specific optimizations for JPEG outputs
+            if out_path.suffix.lower() in ('.jpg', '.jpeg'):
+                save_kwargs.update({
+                    'subsampling': 0,     # Disable chroma subsampling
+                    'optimize': True,     # Enable optimization
+                    'progressive': True   # Progressive encoding
+                })
+            
+            # Preserve ICC profile if present
+            if icc_profile:
+                save_kwargs['icc_profile'] = icc_profile
+                
+            mounted_img.save(out_path, **save_kwargs)
 
     except UnidentifiedImageError:
         # Image format issues - can't be parsed

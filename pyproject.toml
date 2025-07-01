@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "instamatte"
-version = "0.2.2"
+version = "0.3.0"
 description = "Multi-format image processor for social media"
 authors = [{name = "Arthur Ryzhak", email = "ryzhakar@gmail.com"}]
 requires-python = ">=3.9"
