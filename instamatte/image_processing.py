@@ -4,7 +4,7 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from rich.console import Console
 
 from .configuration import SocialFormat
@@ -195,6 +195,16 @@ def replace_transparency_with_mat_color(
     return mat_background
 
 
+def apply_correct_orientation_from_exif_data(source_image: Image.Image) -> Image.Image:
+    """Apply correct orientation from EXIF data and strip orientation tag to prevent auto-rotation."""
+    try:
+        # Apply EXIF orientation and strip the orientation tag
+        return ImageOps.exif_transpose(source_image)
+    except (AttributeError, TypeError):
+        # If no EXIF data or orientation info, return original
+        return source_image
+
+
 def prepare_image_for_format_processing(
     source_image: Image.Image, mat_color: str
 ) -> Image.Image:
@@ -288,7 +298,9 @@ def discover_maximum_height_among_images(image_paths: list[Path]) -> int:
     for image_path in image_paths:
         try:
             with Image.open(image_path) as image:
-                maximum_height = max(maximum_height, image.height)
+                # Apply EXIF orientation to get true dimensions after rotation
+                properly_oriented_image = apply_correct_orientation_from_exif_data(image)
+                maximum_height = max(maximum_height, properly_oriented_image.height)
         except (UnidentifiedImageError, OSError):
             console.print(
                 f"[yellow]Warning: Skipping unreadable image {image_path}"
@@ -327,7 +339,9 @@ def calculate_total_panorama_width(
     for image_path in image_paths:
         try:
             with Image.open(image_path) as image:
-                aspect_ratio = image.width / image.height
+                # Apply EXIF orientation to get true dimensions after rotation
+                properly_oriented_image = apply_correct_orientation_from_exif_data(image)
+                aspect_ratio = properly_oriented_image.width / properly_oriented_image.height
                 scaled_width = round(target_height * aspect_ratio)
                 total_width += scaled_width
         except (UnidentifiedImageError, OSError):
@@ -395,8 +409,11 @@ def stitch_images_into_horizontal_panorama(
     for image_path in lexicographically_sorted_paths:
         try:
             with Image.open(image_path) as source_image:
+                # CRITICAL: Apply correct EXIF orientation to prevent unwanted rotation
+                properly_oriented_image = apply_correct_orientation_from_exif_data(source_image)
+                
                 color_corrected_image = prepare_image_for_format_processing(
-                    source_image, "WHITE"
+                    properly_oriented_image, "WHITE"
                 )
                 height_normalized_image = (
                     scale_image_to_target_height_preserving_aspect_ratio(
@@ -487,8 +504,11 @@ def split_image_into_seamless_carousel_slices(
         with Image.open(source_image_path) as source_image:
             preserved_color_profile = source_image.info.get("icc_profile")
 
+            # Apply correct EXIF orientation to prevent unwanted rotation
+            properly_oriented_image = apply_correct_orientation_from_exif_data(source_image)
+            
             processed_source = prepare_image_for_format_processing(
-                source_image, "WHITE"
+                properly_oriented_image, "WHITE"
             )
 
             # Step 1: Resize to target height, preserving aspect ratio
@@ -571,8 +591,11 @@ def process_image_to_format(
         with Image.open(source_image_path) as source_image:
             preserved_icc_profile = source_image.info.get("icc_profile")
 
+            # Apply correct EXIF orientation to prevent unwanted rotation
+            properly_oriented_image = apply_correct_orientation_from_exif_data(source_image)
+            
             color_corrected_image = prepare_image_for_format_processing(
-                source_image, format_specification.mat_color
+                properly_oriented_image, format_specification.mat_color
             )
 
             resized_image = resize_image_for_format_specifications(

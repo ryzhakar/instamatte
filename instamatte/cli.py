@@ -217,6 +217,7 @@ app = typer.Typer(
     add_completion=False,
     help="Multi-format image processor for social media with elegant matting.",
     no_args_is_help=False,
+    invoke_without_command=True,
 )
 
 
@@ -296,24 +297,17 @@ def split_carousel_command(
     )
 
 
-@app.command()
-@handle_application_errors
-def default_matte_command(
-    input_directory: Annotated[
-        str,
-        typer.Argument(
-            help="Directory containing images and instamatte.yaml configuration"
-        ),
-    ],
+@app.callback(no_args_is_help=True)
+def main_command(
+    # input_directory: Annotated[
+    #     str,
+    #     typer.Argument(
+    #         help="Directory containing images and instamatte.yaml configuration"
+    #     ),
+    # ],
 ) -> None:
-    """Process images to multiple social media formats with elegant matting (default command)."""
-    execute_batch_image_processing_workflow(input_directory)
-
-
-@app.callback()
-def main_command() -> None:
     """Multi-format image processor for social media with elegant matting."""
-    pass
+    # process_images_command(input_directory)
 
 
 # Create the main application instance
