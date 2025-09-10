@@ -24,7 +24,9 @@ class SocialFormat(BaseModel):
     canvas_height: int = Field(default=1920, ge=1)
     fill_percentage: float = Field(default=80.0, gt=0, le=100)
     mat_thickness: float = Field(
-        default=5.0, ge=0, le=MAX_MAT_THICKNESS_PERCENT,
+        default=5.0,
+        ge=0,
+        le=MAX_MAT_THICKNESS_PERCENT,
     )
     image_pattern: str = Field(default="*.{jpg,jpeg,png,gif,bmp}")
     mat_color: str = Field(default="WHITE")
@@ -90,10 +92,10 @@ def load_social_format_configurations(config_path: Path) -> List[SocialFormat]:
 def discover_configuration_file(work_directory: Path) -> Path:
     """Discover configuration file in work directory, creating if needed."""
     config_path = work_directory / CONFIG_FILENAME
-    
+
     if not config_path.exists():
         create_sample_configuration_file(config_path)
-    
+
     return config_path
 
 
@@ -103,14 +105,16 @@ def prepare_format_output_directory(
     """Prepare output directory for format processing."""
     absolute_output_path = work_directory / format_config.output_dir
     format_config.output_dir = str(absolute_output_path)
-    
+
     try:
         absolute_output_path.mkdir(parents=True, exist_ok=True)
     except (PermissionError, OSError) as e:
-        console.print(textwrap.dedent(f"""
+        console.print(
+            textwrap.dedent(f"""
             [red]Error creating output directory
             {format_config.output_dir}: {e}
-        """).strip())
+        """).strip()
+        )
         raise
-    
+
     return format_config
