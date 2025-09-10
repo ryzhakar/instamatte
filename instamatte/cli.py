@@ -19,7 +19,7 @@ from .file_operations import (
     discover_images_matching_pattern,
     validate_work_directory_exists,
 )
-from .image_processing import ImageProcessingError, process_image_to_format
+from .image_processing import ImageProcessingError, process_image_to_format, stitch_images_into_horizontal_panorama
 
 console = Console()
 
@@ -106,10 +106,41 @@ def execute_batch_image_processing_workflow(work_directory_path: str) -> None:
         process_images_for_social_format(prepared_format, work_directory)
 
 
+def execute_panorama_stitching_workflow(work_directory_path: str, output_filename: str | None = None) -> None:
+    """Execute panorama stitching workflow for all images in directory."""
+    work_directory = Path(work_directory_path).resolve()
+    validate_work_directory_exists(work_directory)
+
+    # Use standard image patterns for discovery
+    DEFAULT_IMAGE_PATTERN = "*.{jpg,jpeg,png,gif,bmp}"
+    discovered_images = list(discover_images_matching_pattern(work_directory, DEFAULT_IMAGE_PATTERN))
+    
+    if not discovered_images:
+        console.print("[yellow]No images found in directory for panorama stitching")
+        return
+
+    if len(discovered_images) < 2:
+        console.print("[yellow]At least 2 images required for panorama stitching")
+        return
+
+    # Generate output filename if not provided
+    if output_filename is None:
+        output_filename = "panorama.png"
+    
+    output_path = work_directory / output_filename
+    
+    try:
+        stitch_images_into_horizontal_panorama(discovered_images, output_path)
+        console.print(f"[green]Panorama created successfully: {output_path}")
+    except ImageProcessingError as stitching_error:
+        console.print(f"[red]Error creating panorama: {stitching_error}")
+        raise typer.Exit(1) from stitching_error
+
+
 app = typer.Typer(
     add_completion=False,
     help="Multi-format image processor for social media with elegant matting.",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 
 @app.command("matte")
@@ -125,24 +156,45 @@ def process_images_command(
     """Process images to multiple social media formats with elegant matting."""
     execute_batch_image_processing_workflow(input_directory)
 
-@app.callback(invoke_without_command=True)
+
+@app.command("stitch")
 @handle_application_errors
-def main_command(
-    ctx: typer.Context,
+def stitch_panorama_command(
     input_directory: Annotated[
+        str,
+        typer.Argument(
+            help="Directory containing images to stitch into panorama"
+        )
+    ],
+    output_filename: Annotated[
         str | None,
-        typer.Argument(help="Directory with images and config.yaml"),
+        typer.Option(
+            "--output", "-o",
+            help="Output filename for panorama (default: panorama.png)"
+        )
     ] = None,
 ) -> None:
-    """Process images to multiple social media formats with elegant matting.
-    
-    When no subcommand is specified, defaults to processing images.
-    """
-    if ctx.invoked_subcommand is None:
-        if input_directory is None:
-            console.print("[red]Error: Input directory is required")
-            raise typer.Exit(1)
-        execute_batch_image_processing_workflow(input_directory)
+    """Stitch images horizontally into a panorama with height normalization."""
+    execute_panorama_stitching_workflow(input_directory, output_filename)
+
+@app.command()
+@handle_application_errors
+def default_matte_command(
+    input_directory: Annotated[
+        str, 
+        typer.Argument(
+            help="Directory containing images and instamatte.yaml configuration"
+        )
+    ],
+) -> None:
+    """Process images to multiple social media formats with elegant matting (default command)."""
+    execute_batch_image_processing_workflow(input_directory)
+
+
+@app.callback()
+def main_command() -> None:
+    """Multi-format image processor for social media with elegant matting."""
+    pass
 
 
 # Create the main application instance

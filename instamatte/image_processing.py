@@ -239,6 +239,114 @@ def apply_jpeg_optimization_settings(output_path: Path, save_parameters: dict) -
     return save_parameters
 
 
+def discover_maximum_height_among_images(image_paths: list[Path]) -> int:
+    """Find the tallest image height among all images for panorama scaling."""
+    maximum_height = 0
+    
+    for image_path in image_paths:
+        try:
+            with Image.open(image_path) as image:
+                maximum_height = max(maximum_height, image.height)
+        except (UnidentifiedImageError, OSError):
+            console.print(f"[yellow]Warning: Skipping unreadable image {image_path}")
+            continue
+    
+    if maximum_height == 0:
+        raise ImageProcessingError("No valid images found for panorama stitching")
+    
+    return maximum_height
+
+
+def scale_image_to_target_height_preserving_aspect_ratio(
+    source_image: Image.Image, target_height: int
+) -> Image.Image:
+    """Scale image to target height while maintaining original aspect ratio."""
+    if source_image.height == target_height:
+        return source_image
+    
+    aspect_ratio = source_image.width / source_image.height
+    target_width = round(target_height * aspect_ratio)
+    
+    return source_image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+
+def calculate_total_panorama_width(image_paths: list[Path], target_height: int) -> int:
+    """Calculate total width needed for panorama after scaling all images to target height."""
+    total_width = 0
+    
+    for image_path in image_paths:
+        try:
+            with Image.open(image_path) as image:
+                aspect_ratio = image.width / image.height
+                scaled_width = round(target_height * aspect_ratio)
+                total_width += scaled_width
+        except (UnidentifiedImageError, OSError):
+            continue
+    
+    return total_width
+
+
+def create_panorama_canvas_with_optimal_settings(total_width: int, height: int) -> Image.Image:
+    """Create high-quality canvas for panorama stitching."""
+    if total_width <= 0 or height <= 0:
+        raise ImageProcessingError(f"Invalid panorama dimensions: {total_width}x{height}")
+    
+    return Image.new("RGB", (total_width, height), "WHITE")
+
+
+def collect_and_preserve_color_profiles_from_images(image_paths: list[Path]) -> bytes | None:
+    """Collect ICC color profile from first available image for panorama preservation."""
+    for image_path in image_paths:
+        try:
+            with Image.open(image_path) as image:
+                icc_profile = image.info.get("icc_profile")
+                if icc_profile:
+                    return icc_profile
+        except (UnidentifiedImageError, OSError):
+            continue
+    
+    return None
+
+
+def stitch_images_into_horizontal_panorama(image_paths: list[Path], output_path: Path) -> None:
+    """Stitch multiple images horizontally into a panorama with height normalization."""
+    if not image_paths:
+        raise ImageProcessingError("No images provided for panorama stitching")
+    
+    lexicographically_sorted_paths = sorted(image_paths)
+    console.print(f"[blue]Stitching {len(lexicographically_sorted_paths)} images into panorama")
+    
+    target_height = discover_maximum_height_among_images(lexicographically_sorted_paths)
+    total_width = calculate_total_panorama_width(lexicographically_sorted_paths, target_height)
+    
+    panorama_canvas = create_panorama_canvas_with_optimal_settings(total_width, target_height)
+    preserved_color_profile = collect_and_preserve_color_profiles_from_images(lexicographically_sorted_paths)
+    
+    current_horizontal_position = 0
+    
+    for image_path in lexicographically_sorted_paths:
+        try:
+            with Image.open(image_path) as source_image:
+                color_corrected_image = prepare_image_for_format_processing(source_image, "WHITE")
+                height_normalized_image = scale_image_to_target_height_preserving_aspect_ratio(
+                    color_corrected_image, target_height
+                )
+                
+                panorama_canvas.paste(height_normalized_image, (current_horizontal_position, 0))
+                current_horizontal_position += height_normalized_image.width
+                
+        except (UnidentifiedImageError, OSError) as processing_error:
+            console.print(f"[yellow]Warning: Skipping {image_path}: {processing_error}")
+            continue
+    
+    save_parameters = {"optimize": True}
+    if preserved_color_profile:
+        save_parameters["icc_profile"] = preserved_color_profile
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    panorama_canvas.save(output_path, "PNG", **save_parameters)
+
+
 def process_image_to_format(source_image_path: Path, format_specification: SocialFormat) -> None:
     """Process single image according to social media format specifications."""
     try:
