@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-instamatte = "instamatte:app"
+instamatte = "instamatte.cli:cli_application"
 
 [tool.ruff]
 line-length = 80
