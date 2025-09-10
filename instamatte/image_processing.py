@@ -195,7 +195,9 @@ def replace_transparency_with_mat_color(
     return mat_background
 
 
-def apply_correct_orientation_from_exif_data(source_image: Image.Image) -> Image.Image:
+def apply_correct_orientation_from_exif_data(
+    source_image: Image.Image,
+) -> Image.Image:
     """Apply correct orientation from EXIF data and strip orientation tag to prevent auto-rotation."""
     try:
         # Apply EXIF orientation and strip the orientation tag
@@ -299,8 +301,12 @@ def discover_maximum_height_among_images(image_paths: list[Path]) -> int:
         try:
             with Image.open(image_path) as image:
                 # Apply EXIF orientation to get true dimensions after rotation
-                properly_oriented_image = apply_correct_orientation_from_exif_data(image)
-                maximum_height = max(maximum_height, properly_oriented_image.height)
+                properly_oriented_image = (
+                    apply_correct_orientation_from_exif_data(image)
+                )
+                maximum_height = max(
+                    maximum_height, properly_oriented_image.height
+                )
         except (UnidentifiedImageError, OSError):
             console.print(
                 f"[yellow]Warning: Skipping unreadable image {image_path}"
@@ -340,8 +346,13 @@ def calculate_total_panorama_width(
         try:
             with Image.open(image_path) as image:
                 # Apply EXIF orientation to get true dimensions after rotation
-                properly_oriented_image = apply_correct_orientation_from_exif_data(image)
-                aspect_ratio = properly_oriented_image.width / properly_oriented_image.height
+                properly_oriented_image = (
+                    apply_correct_orientation_from_exif_data(image)
+                )
+                aspect_ratio = (
+                    properly_oriented_image.width
+                    / properly_oriented_image.height
+                )
                 scaled_width = round(target_height * aspect_ratio)
                 total_width += scaled_width
         except (UnidentifiedImageError, OSError):
@@ -410,8 +421,10 @@ def stitch_images_into_horizontal_panorama(
         try:
             with Image.open(image_path) as source_image:
                 # CRITICAL: Apply correct EXIF orientation to prevent unwanted rotation
-                properly_oriented_image = apply_correct_orientation_from_exif_data(source_image)
-                
+                properly_oriented_image = (
+                    apply_correct_orientation_from_exif_data(source_image)
+                )
+
                 color_corrected_image = prepare_image_for_format_processing(
                     properly_oriented_image, "WHITE"
                 )
@@ -505,8 +518,10 @@ def split_image_into_seamless_carousel_slices(
             preserved_color_profile = source_image.info.get("icc_profile")
 
             # Apply correct EXIF orientation to prevent unwanted rotation
-            properly_oriented_image = apply_correct_orientation_from_exif_data(source_image)
-            
+            properly_oriented_image = apply_correct_orientation_from_exif_data(
+                source_image
+            )
+
             processed_source = prepare_image_for_format_processing(
                 properly_oriented_image, "WHITE"
             )
@@ -592,8 +607,10 @@ def process_image_to_format(
             preserved_icc_profile = source_image.info.get("icc_profile")
 
             # Apply correct EXIF orientation to prevent unwanted rotation
-            properly_oriented_image = apply_correct_orientation_from_exif_data(source_image)
-            
+            properly_oriented_image = apply_correct_orientation_from_exif_data(
+                source_image
+            )
+
             color_corrected_image = prepare_image_for_format_processing(
                 properly_oriented_image, format_specification.mat_color
             )

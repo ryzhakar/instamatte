@@ -3,7 +3,7 @@
 import functools
 import textwrap
 from pathlib import Path
-from typing import Annotated, Callable, List, TypeVar
+from typing import Annotated, Callable, TypeVar
 
 import typer
 from rich.console import Console
@@ -273,7 +273,7 @@ def split_carousel_command(
             "-w",
             help="Target width for carousel slices (default: 1350)",
         ),
-    ] = 1350,
+    ] = 1080,
     height: Annotated[
         int,
         typer.Option(
@@ -281,7 +281,7 @@ def split_carousel_command(
             "-h",
             help="Target height for carousel slices (default: 1080)",
         ),
-    ] = 1080,
+    ] = 1350,
     output_directory: Annotated[
         str | None,
         typer.Option(
@@ -298,16 +298,8 @@ def split_carousel_command(
 
 
 @app.callback(no_args_is_help=True)
-def main_command(
-    # input_directory: Annotated[
-    #     str,
-    #     typer.Argument(
-    #         help="Directory containing images and instamatte.yaml configuration"
-    #     ),
-    # ],
-) -> None:
+def main_command() -> None:
     """Multi-format image processor for social media with elegant matting."""
-    # process_images_command(input_directory)
 
 
 # Create the main application instance
